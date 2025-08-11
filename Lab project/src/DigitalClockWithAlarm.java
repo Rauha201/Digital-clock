@@ -1,5 +1,7 @@
 import javax.swing.*;
 import java.awt.*;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.io.File;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
@@ -15,46 +17,66 @@ public class DigitalClockWithAlarm {
     private JButton setAlarmButton;
     private String alarmTime = null;
     private boolean alarmTriggered = false;
+    private TrayIcon trayIcon;
+    private JComboBox<String> timeFormatBox;
+    private JComboBox<String> amPmBox;
 
     public DigitalClockWithAlarm() {
         frame = new JFrame("Digital Clock with Alarm");
-        frame.setSize(400, 250);
-        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setSize(500, 300);
+        frame.setDefaultCloseOperation(JFrame.HIDE_ON_CLOSE);
         frame.setLocationRelativeTo(null);
-        frame.setLayout(new GridLayout(4, 1));
+        frame.setLayout(new GridLayout(5, 1));
 
-        // Time display (12-hour format with seconds)
+        
         timeLabel = new JLabel("12:00:00 AM", SwingConstants.CENTER);
-        timeLabel.setFont(new Font("Arial", Font.BOLD, 36));
+        timeLabel.setFont(new Font("Arial", Font.BOLD, 40));
         frame.add(timeLabel);
 
-        // Date display
+        
         dateLabel = new JLabel("Date goes here", SwingConstants.CENTER);
-        dateLabel.setFont(new Font("Arial", Font.PLAIN, 20));
+        dateLabel.setFont(new Font("Arial", Font.PLAIN, 22));
         frame.add(dateLabel);
 
-        // Alarm input panel (HH:mm only)
+        
+        JPanel formatPanel = new JPanel();
+        formatPanel.add(new JLabel("Select Time Format:"));
+        timeFormatBox = new JComboBox<>(new String[]{"12-hour", "24-hour"});
+        formatPanel.add(timeFormatBox);
+        frame.add(formatPanel);
+
+        
         JPanel alarmPanel = new JPanel();
         alarmPanel.add(new JLabel("Set Alarm (HH:MM):"));
         alarmField = new JTextField(5);
         alarmPanel.add(alarmField);
+        amPmBox = new JComboBox<>(new String[]{"AM", "PM"});
+        alarmPanel.add(amPmBox);
         frame.add(alarmPanel);
 
-        // Alarm button
+        
         setAlarmButton = new JButton("Set Alarm");
+        setAlarmButton.setFont(new Font("Arial", Font.BOLD, 18));
         frame.add(setAlarmButton);
 
-        // Alarm button action
+        
         setAlarmButton.addActionListener(e -> {
             String input = alarmField.getText().trim();
+            boolean is12Hour = timeFormatBox.getSelectedItem().equals("12-hour");
+
             if (!input.matches("\\d{2}:\\d{2}")) {
                 JOptionPane.showMessageDialog(frame, "Invalid format. Use HH:mm", "Error", JOptionPane.ERROR_MESSAGE);
                 alarmTime = null;
                 return;
             }
             try {
-                new SimpleDateFormat("hh:mm").parse(input); // Validate format
-                alarmTime = input;
+                if (is12Hour) {
+                    SimpleDateFormat sdf = new SimpleDateFormat("hh:mm a");
+                    Date date = sdf.parse(input + " " + amPmBox.getSelectedItem());
+                    alarmTime = sdf.format(date);
+                } else {
+                    alarmTime = input;
+                }
                 alarmTriggered = false;
                 JOptionPane.showMessageDialog(frame, "Alarm set for: " + alarmTime);
             } catch (Exception ex) {
@@ -62,25 +84,48 @@ public class DigitalClockWithAlarm {
             }
         });
 
-        // Clock update timer
+        
         Timer timer = new Timer(1000, e -> {
             Date now = new Date();
-            String currentTime = new SimpleDateFormat("hh:mm:ss a").format(now); // 12-hour with seconds
+            boolean is12Hour = timeFormatBox.getSelectedItem().equals("12-hour");
+            String currentTime;
+            if (is12Hour) {
+                currentTime = new SimpleDateFormat("hh:mm:ss a").format(now);
+            } else {
+                currentTime = new SimpleDateFormat("HH:mm:ss").format(now);
+            }
             String currentDate = new SimpleDateFormat("EEEE, dd MMMM yyyy").format(now);
 
             timeLabel.setText(currentTime);
             dateLabel.setText(currentDate);
 
-            // Check alarm match (ignoring seconds)
-            String currentTimeNoSec = new SimpleDateFormat("hh:mm").format(now);
-            if (alarmTime != null && currentTimeNoSec.equals(alarmTime) && !alarmTriggered) {
-                alarmTriggered = true;
-                playAlarmSound();
-                JOptionPane.showMessageDialog(null, "⏰ Alarm! It's " + currentTime);
+            
+            if (alarmTime != null) {
+                String currentCheck = is12Hour
+                        ? new SimpleDateFormat("hh:mm a").format(now)
+                        : new SimpleDateFormat("HH:mm").format(now);
+                if (currentCheck.equalsIgnoreCase(alarmTime) && !alarmTriggered) {
+                    alarmTriggered = true;
+                    playAlarmSound();
+                    JOptionPane.showMessageDialog(null, "⏰ Alarm! It's " + currentTime);
+                }
             }
         });
         timer.setInitialDelay(0);
         timer.start();
+
+        
+        setupSystemTray();
+
+        
+        timeFormatBox.addActionListener(e -> {
+            boolean is12Hour = timeFormatBox.getSelectedItem().equals("12-hour");
+            amPmBox.setVisible(is12Hour);
+            frame.revalidate();
+            frame.repaint();
+        });
+
+        amPmBox.setVisible(true); 
 
         frame.setVisible(true);
     }
@@ -101,6 +146,41 @@ public class DigitalClockWithAlarm {
             e.printStackTrace();
             JOptionPane.showMessageDialog(frame, "Failed to play alarm sound.", "Sound Error", JOptionPane.ERROR_MESSAGE);
         }
+    }
+
+    private void setupSystemTray() {
+        if (!SystemTray.isSupported()) {
+            System.err.println("SystemTray not supported");
+            return;
+        }
+        SystemTray tray = SystemTray.getSystemTray();
+        Image icon = Toolkit.getDefaultToolkit().getImage("sound/clock.jpg");
+
+        PopupMenu popup = new PopupMenu();
+        MenuItem openItem = new MenuItem("Open Clock");
+        openItem.addActionListener(e -> frame.setVisible(true));
+        popup.add(openItem);
+
+        MenuItem exitItem = new MenuItem("Exit");
+        exitItem.addActionListener(e -> {
+            tray.remove(trayIcon);
+            System.exit(0);
+        });
+        popup.add(exitItem);
+
+        trayIcon = new TrayIcon(icon, "Digital Clock", popup);
+        trayIcon.setImageAutoSize(true);
+        try {
+            tray.add(trayIcon);
+        } catch (AWTException e) {
+            System.err.println("TrayIcon could not be added.");
+        }
+
+        frame.addWindowListener(new WindowAdapter() {
+            public void windowClosing(WindowEvent e) {
+                frame.setVisible(false);
+            }
+        });
     }
 
     public static void main(String[] args) {
